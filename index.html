@@ -87,6 +87,11 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
 .fab svg{width:18px;height:18px;fill:currentColor}
 .fab[aria-pressed="true"]{background:var(--mustard);color:#1B1A18}
 .fab:focus-visible{outline:2px dashed var(--teal);outline-offset:2px}
+.zoombar{position:absolute;top:64px;right:10px;display:grid;border:2px solid var(--rule);background:var(--panel)}
+.zoombar button{width:40px;height:36px;border:0;border-bottom:2px solid var(--rule);background:transparent;color:var(--ink);font:700 18px var(--display);cursor:pointer;padding:0}
+.zoombar button:last-child{border-bottom:0;font:700 11px var(--mono);font-variant-numeric:tabular-nums}
+.zoombar button:hover{background:color-mix(in srgb, var(--mustard) 35%, transparent)}
+.zoombar button:focus-visible{outline:2px dashed var(--teal);outline-offset:-3px}
 .lab{font-family:var(--mono);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.12em;display:flex;justify-content:space-between;align-items:center}
 .lab span{color:var(--muted);font-weight:500}
 
@@ -244,7 +249,7 @@ select{font:600 13px var(--display);border:2px solid var(--rule);background:var(
           <button type="button" data-view="below">Below</button>
           <button type="button" data-view="persp">Perspective</button>
         </div>
-        <small class="note">Drag the globe, or drag the artwork itself, to orbit all the way around. Drag the sun to move the light: near the middle is overhead, near the rim is low with long shadows.</small>
+        <small class="note">Drag the globe, or drag the artwork itself, to orbit all the way around. Scroll or pinch on the artwork to zoom; Shift-drag or two fingers to pan. Drag the sun to move the light: near the middle is overhead, near the rim is low with long shadows.</small>
         <div class="ctl"><div class="row"><label for="shadow">Shading</label><output id="shadowOut"></output></div>
           <input type="range" id="shadow" min="0" max="100" value="40"></div>
         <div class="toggles">
@@ -331,7 +336,7 @@ select{font:600 13px var(--display);border:2px solid var(--rule);background:var(
   </aside>
 
   <section class="stagecol" aria-label="Artwork">
-    <div class="stage"><button type="button" class="fab" id="playFab" aria-label="Play animation" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path id="fabIcon" d="M7 4l13 8-13 8z"/></svg></button><canvas id="cv" role="img" aria-label="Generative artwork made from sleep data"></canvas></div>
+    <div class="stage"><button type="button" class="fab" id="playFab" aria-label="Play animation" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path id="fabIcon" d="M7 4l13 8-13 8z"/></svg></button><div class="zoombar" role="group" aria-label="Zoom"><button type="button" id="zoomIn" aria-label="Zoom in">+</button><button type="button" id="zoomOut" aria-label="Zoom out">&minus;</button><button type="button" id="zoomReset" aria-label="Reset zoom and position">1×</button></div><canvas id="cv" role="img" aria-label="Generative artwork made from sleep data"></canvas></div>
     <div class="legend"><p id="legendText"></p><div class="keys" id="keys"></div></div>
   </section>
 </div>
@@ -648,7 +653,7 @@ function makeNoise(seed){
 /* ---------- state ---------- */
 const P = { style:"corona", peaks:.55, contrast:.5, complexity:.55, twist:0, weight:.35,
   nights:999, naps:false, labels:true, palette:"ember", bg:"night", seed:1207, mode:"both", dur:5,
-  yaw:0, pitch:0, cast:true, lightX:-.5, lightY:-.55, shadow:.4 };
+  yaw:0, pitch:0, cast:true, zoom:1, panX:0, panY:0, lightX:-.5, lightY:-.55, shadow:.4 };
 const PRESETS = { corona:{palette:"ember", bg:"night"}, burst:{palette:"burst", bg:"paper"}, bloom:{palette:"tide", bg:"night"} };
 
 function selection(){
@@ -701,10 +706,14 @@ function render(ctx, S, anim = STATIC){
     const L = layers(S), ax = L.art.getContext("2d");
     ax.setTransform(1, 0, 0, 1, 0, 0); ax.globalCompositeOperation = "source-over"; ax.globalAlpha = 1;
     ax.clearRect(0, 0, S, S);
+    // zoom and pan: scale the whole drawing about the frame centre, then shift it
+    const zm = P.zoom || 1;
+    ax.setTransform(zm, 0, 0, zm, (.5 - .5 * zm + P.panX) * S, (.5 - .5 * zm + P.panY) * S);
     ax.lineCap = "round"; ax.lineJoin = "round";
     if (P.style === "corona") drawCorona(ax, kit);
     else if (P.style === "burst") drawBurst(ax, kit);
     else drawBloom(ax, kit);
+    ax.setTransform(1, 0, 0, 1, 0, 0);
     WARP = null;
     const lt = lightVec(), cxL = P.style === "burst" ? S * .55 : S / 2, cyL = P.style === "burst" ? S * .47 : S / 2;
     if (P.style === "bloom" && P.cast){
@@ -1235,7 +1244,7 @@ function sync(){
   const D = selection();
   $("nightsOut").textContent = D.length + " / " + pool.length;
   $("naps").checked = P.naps; $("labels").checked = P.labels;
-  syncPads();
+  syncPads(); syncZoom();
   $("dur").value = P.dur; $("durOut").textContent = P.dur + " s";
   document.querySelectorAll("#modeSeg button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.mode === P.mode)));
   $("seedLab").textContent = "#" + P.seed;
@@ -1348,7 +1357,56 @@ function bindOrbit(el, gain){
   el.addEventListener("pointerup", end); el.addEventListener("pointercancel", end);
 }
 bindOrbit($("orbitPad"), 2.2);
-bindOrbit(cv, 1.2);
+/* artwork gestures: one finger or mouse drag orbits; pinch, wheel or trackpad pinch zooms toward that spot;
+   two fingers, Shift+drag or right-drag pans; double-click resets the zoom */
+function syncZoom(){ $("zoomReset").textContent = (Math.round(P.zoom * 10) / 10) + "×"; }
+function clampPan(){ const m = .5 * Math.max(1, P.zoom); P.panX = Math.max(-m, Math.min(m, P.panX)); P.panY = Math.max(-m, Math.min(m, P.panY)); }
+function zoomAt(f, sx, sy){
+  const z0 = P.zoom, z1 = Math.max(.5, Math.min(6, z0 * f)), r = z1 / z0;
+  P.panX = sx - .5 - (sx - .5 - P.panX) * r; P.panY = sy - .5 - (sy - .5 - P.panY) * r; P.zoom = z1;
+  clampPan(); syncZoom(); if (!playing) schedule();
+}
+function zoomTo(z1, ms = 220){
+  const z0 = P.zoom, x0 = P.panX, y0 = P.panY, t0 = performance.now(), reset = z1 === 1;
+  const st = now => { const u = Math.min(1, (now - t0) / ms), e = 1 - Math.pow(1 - u, 3);
+    const z = z0 + (z1 - z0) * e; if (reset){ P.panX = x0 * (1 - e); P.panY = y0 * (1 - e); P.zoom = z; } else zoomAt(z / P.zoom, .5, .5);
+    syncZoom(); if (!playing) draw(); if (u < 1) requestAnimationFrame(st); };
+  requestAnimationFrame(st);
+}
+$("zoomIn").addEventListener("click", () => zoomTo(Math.min(6, P.zoom * 1.5)));
+$("zoomOut").addEventListener("click", () => zoomTo(Math.max(.5, P.zoom / 1.5)));
+$("zoomReset").addEventListener("click", () => zoomTo(1));
+{
+  const ptrs = new Map(); let pinch = null, mode = "orbit";
+  const frac = e => { const r = cv.getBoundingClientRect(); return [(e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height]; };
+  const pstate = () => { const [a, b] = [...ptrs.values()]; return { d: Math.hypot(a[0] - b[0], a[1] - b[1]) || 1e-3, mx: (a[0] + b[0]) / 2, my: (a[1] + b[1]) / 2 }; };
+  cv.addEventListener("pointerdown", e => {
+    cancelAnimationFrame(tween); cv.setPointerCapture(e.pointerId); ptrs.set(e.pointerId, frac(e));
+    mode = (e.shiftKey || e.button === 1 || e.button === 2) ? "pan" : "orbit";
+    if (ptrs.size === 2) pinch = pstate();
+    e.preventDefault();
+  });
+  cv.addEventListener("pointermove", e => {
+    if (!ptrs.has(e.pointerId)) return;
+    const prev = ptrs.get(e.pointerId), cur = frac(e); ptrs.set(e.pointerId, cur);
+    if (ptrs.size >= 2){
+      const s = pstate();
+      if (pinch){ P.panX += s.mx - pinch.mx; P.panY += s.my - pinch.my; zoomAt(s.d / pinch.d, s.mx, s.my); }
+      pinch = s; return;
+    }
+    const dx = cur[0] - prev[0], dy = cur[1] - prev[1];
+    if (mode === "pan"){ P.panX += dx; P.panY += dy; clampPan(); }
+    else { const k = 1.2 * Math.PI / Math.max(1, P.zoom * .6 + .4);
+      P.yaw = wrapA(P.yaw - dx * k); P.pitch = Math.max(-Math.PI, Math.min(Math.PI, P.pitch - dy * k)); syncPads(); }
+    if (!playing) schedule();
+  });
+  const up = e => { ptrs.delete(e.pointerId); if (ptrs.size < 2) pinch = null; if (ptrs.size === 1) mode = "orbit"; };
+  cv.addEventListener("pointerup", up); cv.addEventListener("pointercancel", up);
+  cv.addEventListener("wheel", e => { e.preventDefault(); const [sx, sy] = frac(e);
+    zoomAt(Math.exp(-e.deltaY * (e.ctrlKey ? .012 : .0018)), sx, sy); }, { passive:false });
+  cv.addEventListener("dblclick", () => zoomTo(1));
+  cv.addEventListener("contextmenu", e => e.preventDefault());
+}
 $("orbitPad").addEventListener("dblclick", () => goView("top"));
 $("orbitPad").addEventListener("keydown", e => {
   const st = (e.shiftKey ? 15 : 5) * D2R;
