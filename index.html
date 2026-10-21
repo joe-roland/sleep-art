@@ -87,6 +87,9 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
 .fab svg{width:18px;height:18px;fill:currentColor}
 .fab[aria-pressed="true"]{background:var(--mustard);color:#1B1A18}
 .fab:focus-visible{outline:2px dashed var(--teal);outline-offset:2px}
+/* phones: no double-tap page zoom, no long-press text selection or callout on the controls and artwork */
+button,.pad,.seg,.views,.swatches,.toggle{touch-action:manipulation}
+.stage,.stage *,.zoombar,.zoombar button,.fab,.pad,.views button,.seg button{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent}
 .zoombar{position:absolute;top:64px;right:10px;display:grid;border:2px solid var(--rule);background:var(--panel)}
 .zoombar button{width:40px;height:36px;border:0;border-bottom:2px solid var(--rule);background:transparent;color:var(--ink);font:700 18px var(--display);cursor:pointer;padding:0}
 .zoombar button:last-child{border-bottom:0;font:700 11px var(--mono);font-variant-numeric:tabular-nums}
@@ -688,7 +691,7 @@ let ZOOM = 1, PICK = [], RENDER_PICK = false;
 const CAM = { home:[0, 0, 0], cx:.5, cy:.5 };
 const DIST0 = 3, DMIN = .004, DMAX = 12;
 // the lens widens as the camera gets close, so from inside the piece you can see around you
-const focal = d => Math.max(.42, Math.min(3, d));
+const focal = d => Math.max(.42, 3 * Math.pow(Math.min(1, d / 3), .6)); // stays a true zoom all the way in
 const ZMAX = 10000, ZMIN = .5;
 const STATIC = { grow:1, rot:0, twistAdd:0, peaksAdd:0, yawAdd:0, pitchAdd:0 };
 let A = STATIC;
@@ -1455,6 +1458,8 @@ function holdZoom(btn, dir){
   btn.addEventListener("pointerup", stop); btn.addEventListener("pointercancel", stop); btn.addEventListener("lostpointercapture", stop);
   btn.addEventListener("click", e => { if (e.detail === 0) flyBy(dir > 0 ? 1.8 : 1 / 1.8, .5, .5, dir > 0 ? .4 : 0); }); // keyboard
   btn.addEventListener("contextmenu", e => e.preventDefault());
+  // older iPhones ignore touch-action on quick double taps; swallowing touchend stops the page zoom there too
+  btn.addEventListener("touchend", e => e.preventDefault(), { passive:false });
 }
 holdZoom($("zoomIn"), 1); holdZoom($("zoomOut"), -1);
 $("zoomReset").addEventListener("click", () => camReset());
