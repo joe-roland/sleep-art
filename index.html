@@ -149,6 +149,14 @@ select{font:600 13px var(--display);border:2px solid var(--rule);background:var(
 .stage canvas{display:block;width:100%;height:100%}
 .legend{display:flex;flex-wrap:wrap;gap:12px 20px;align-items:flex-start;justify-content:space-between;font-family:var(--mono);font-size:11.5px;line-height:1.5;color:var(--muted);max-width:min(100%, calc(100vh - 140px));margin:0 auto;width:100%}
 .legend p{margin:0;max-width:62ch;flex:1 1 320px}
+.keylist{list-style:none;margin:0;padding:0;display:grid;gap:7px;font-family:var(--mono);font-size:11.5px;line-height:1.4;color:var(--muted)}
+.legend .keylist{grid-template-columns:repeat(auto-fit, minmax(240px, 1fr));gap:7px 20px;width:100%}
+.keylist li{display:grid;grid-template-columns:16px minmax(0,1fr);gap:8px;align-items:start}
+.keylist b{color:var(--ink);font-weight:700}
+.keylist .g{width:14px;height:14px;margin-top:1px;border:1.5px solid var(--rule);display:block}
+.keylist .g.line{border:0;height:2px;margin-top:7px;background:var(--ink)}
+.keylist .g.dot{border-radius:50%}
+.keylist .g.ring{border-radius:50%;background:transparent}
 .keys{display:flex;gap:12px;flex-wrap:wrap}
 .keys span{display:flex;align-items:center;gap:6px;color:var(--ink)}
 .keys i{width:12px;height:12px;border:1.5px solid var(--rule);display:block}
@@ -163,7 +171,10 @@ select{font:600 13px var(--display);border:2px solid var(--rule);background:var(
   .chip{font-size:10px;padding:4px 7px;border-width:1.5px}
   .stagecol{grid-row:2;position:sticky;top:env(safe-area-inset-top, 0px);z-index:5;background:var(--bg);padding-block:6px 8px;box-shadow:0 0 0 16px var(--bg);gap:0}
   .stage{max-width:min(100%, 52vh);max-width:min(100%, 52svh)}
-  .legend{display:none}
+  .legend{display:flex;padding-top:8px;gap:8px}
+  .legend .keylist{display:none}
+  .keys{gap:8px 12px;font-size:10.5px}
+  .keys i{width:10px;height:10px}
   .mobile-only{display:block}
   .rail{grid-row:3}
 }
@@ -204,7 +215,10 @@ select{font:600 13px var(--display);border:2px solid var(--rule);background:var(
           <button type="button" data-style="burst" aria-pressed="false">Burst</button>
           <button type="button" data-style="bloom" aria-pressed="false">Bloom</button>
         </div>
-        <p class="note mobile-only" id="legendMobile"></p>
+        <div class="mobile-only">
+          <div class="sublab" style="margin-bottom:8px">How to read it</div>
+          <ul class="keylist" id="keyMobile"></ul>
+        </div>
       </div>
     </details>
 
@@ -249,7 +263,7 @@ select{font:600 13px var(--display);border:2px solid var(--rule);background:var(
           <button type="button" data-view="below">Below</button>
           <button type="button" data-view="persp">Perspective</button>
         </div>
-        <small class="note">Drag the globe, or drag the artwork itself, to orbit all the way around. Scroll or pinch on the artwork to zoom; Shift-drag or two fingers to pan. Drag the sun to move the light: near the middle is overhead, near the rim is low with long shadows.</small>
+        <small class="note">Drag the globe, or drag the artwork itself, to orbit all the way around. Scroll, pinch or hold + to fly in. The camera homes in on the line under your cursor (or nearest the middle), so you can shrink right down onto one line, then drag to look around the whole piece from there. Shift-drag or two fingers slide sideways. Drag the sun to move the light: near the middle is overhead, near the rim is low with long shadows.</small>
         <div class="ctl"><div class="row"><label for="shadow">Shading</label><output id="shadowOut"></output></div>
           <input type="range" id="shadow" min="0" max="100" value="40"></div>
         <div class="toggles">
@@ -337,7 +351,7 @@ select{font:600 13px var(--display);border:2px solid var(--rule);background:var(
 
   <section class="stagecol" aria-label="Artwork">
     <div class="stage"><button type="button" class="fab" id="playFab" aria-label="Play animation" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path id="fabIcon" d="M7 4l13 8-13 8z"/></svg></button><div class="zoombar" role="group" aria-label="Zoom"><button type="button" id="zoomIn" aria-label="Zoom in">+</button><button type="button" id="zoomOut" aria-label="Zoom out">&minus;</button><button type="button" id="zoomReset" aria-label="Reset zoom and position">1×</button></div><canvas id="cv" role="img" aria-label="Generative artwork made from sleep data"></canvas></div>
-    <div class="legend"><p id="legendText"></p><div class="keys" id="keys"></div></div>
+    <div class="legend"><div class="keys" id="keys" aria-label="Colour key"></div><ul class="keylist" id="keyDesk"></ul></div>
   </section>
 </div>
 
@@ -653,7 +667,7 @@ function makeNoise(seed){
 /* ---------- state ---------- */
 const P = { style:"corona", peaks:.55, contrast:.5, complexity:.55, twist:0, weight:.35,
   nights:999, naps:false, labels:true, palette:"ember", bg:"night", seed:1207, mode:"both", dur:5,
-  yaw:0, pitch:0, cast:true, zoom:1, panX:0, panY:0, lightX:-.5, lightY:-.55, shadow:.4 };
+  yaw:0, pitch:0, cast:true, dist:3, tgt:null, lightX:-.5, lightY:-.55, shadow:.4 };
 const PRESETS = { corona:{palette:"ember", bg:"night"}, burst:{palette:"burst", bg:"paper"}, bloom:{palette:"tide", bg:"night"} };
 
 function selection(){
@@ -670,6 +684,12 @@ function statsOf(D){
 }
 
 /* ---------- drawing ---------- */
+let ZOOM = 1, PICK = [], RENDER_PICK = false;
+const CAM = { home:[0, 0, 0], cx:.5, cy:.5 };
+const DIST0 = 3, DMIN = .004, DMAX = 12;
+// the lens widens as the camera gets close, so from inside the piece you can see around you
+const focal = d => Math.max(.42, Math.min(3, d));
+const ZMAX = 10000, ZMIN = .5;
 const STATIC = { grow:1, rot:0, twistAdd:0, peaksAdd:0, yawAdd:0, pitchAdd:0 };
 let A = STATIC;
 /* t runs 0→1 over one loop. Grow reveals nights in date order, then holds; drift sways, spins and breathes. */
@@ -696,7 +716,9 @@ function render(ctx, S, anim = STATIC){
     // contrast also pushes tone: weak nights sink darker, strong nights lift brighter
     const tone = (c, x) => shade(c, (curve(x) - .5) * P.contrast * 1.1);
     const rnd = mulberry32(P.seed), noise = makeNoise(P.seed);
-    const U = S / 1600; // unit relative to a 1600px canvas
+    // unit relative to a 1600px canvas; it shrinks as you zoom so strokes stay fine and new detail resolves
+    ZOOM = 1;
+    const U = S / 1600;
     const N = D.length, ramp = Math.max(1, N * .1);
     const rev = i => { const e = clamp01((A.grow * (N + ramp) - i) / ramp); return 1 - Math.pow(1 - e, 3); };
     const kit = { D, st, pal, norm, peak, curve, alphaOf, tone, rnd, noise, U, S, rev };
@@ -707,8 +729,6 @@ function render(ctx, S, anim = STATIC){
     ax.setTransform(1, 0, 0, 1, 0, 0); ax.globalCompositeOperation = "source-over"; ax.globalAlpha = 1;
     ax.clearRect(0, 0, S, S);
     // zoom and pan: scale the whole drawing about the frame centre, then shift it
-    const zm = P.zoom || 1;
-    ax.setTransform(zm, 0, 0, zm, (.5 - .5 * zm + P.panX) * S, (.5 - .5 * zm + P.panY) * S);
     ax.lineCap = "round"; ax.lineJoin = "round";
     if (P.style === "corona") drawCorona(ax, kit);
     else if (P.style === "burst") drawBurst(ax, kit);
@@ -716,7 +736,7 @@ function render(ctx, S, anim = STATIC){
     ax.setTransform(1, 0, 0, 1, 0, 0);
     WARP = null;
     const lt = lightVec(), cxL = P.style === "burst" ? S * .55 : S / 2, cyL = P.style === "burst" ? S * .47 : S / 2;
-    if (P.style === "bloom" && P.cast){
+    if (P.style === "bloom" && P.cast && P.dist > 1.6){
       // cast shadow: a blurred silhouette pushed away from the light; low light throws it further
       const sc = L.sh, sx = sc.getContext("2d"), sw = sc.width;
       sx.globalCompositeOperation = "source-over"; sx.clearRect(0, 0, sw, sw);
@@ -773,7 +793,7 @@ function worldLight(){ const l = lightVec(); return [l[0], l[1], Math.max(.18, l
    Lines are subdivided so straight strokes bend into spirals. */
 let WARP = null, WSTEP = 8;
 function setWarp(cx, cy, S, useTilt = true){
-  WSTEP = S * .007;
+  WSTEP = S * .007 / Math.min(ZOOM, 60);
   const tilted = false;
   if (Math.abs(P.twist) < .005 && Math.abs(A.rot) < .0005 && !tilted){ WARP = null; return; }
   const rot = A.rot;
@@ -793,7 +813,7 @@ function setWarp(cx, cy, S, useTilt = true){
 function wp(x, y){ return WARP ? WARP(x, y) : [x, y]; }
 function seg(ctx, x1, y1, x2, y2, first){
   if (!WARP){ if (first) ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); return; }
-  const n = Math.max(1, Math.min(40, Math.ceil(Math.hypot(x2 - x1, y2 - y1) / WSTEP)));
+  const n = Math.max(1, Math.min(160, Math.ceil(Math.hypot(x2 - x1, y2 - y1) / WSTEP)));
   for (let i = first ? 0 : 1; i <= n; i++){ const t = i / n, [x, y] = WARP(lerp(x1, x2, t), lerp(y1, y2, t)); (i === 0) ? ctx.moveTo(x, y) : ctx.lineTo(x, y); }
 }
 function line(ctx, x1, y1, x2, y2){ ctx.beginPath(); seg(ctx, x1, y1, x2, y2, true); ctx.stroke(); }
@@ -819,65 +839,100 @@ function makeScene(){
 function mixHex(a, b, t){ const A = rgb(a), B = rgb(b);
   return "#" + A.map((v, i) => Math.round(lerp(v, B[i], clamp01(t))).toString(16).padStart(2, "0")).join(""); }
 
-function renderScene(ctx, sc, cx, cy, S, pal){
+function renderScene(ctx, sc, cx, cy, S, pal, opts = {}){
   const k = P.twist * 1.25 * TAU / (S * .5), rot = A.rot;
-  const f = S * 3;
   const twist = ([x, y, z]) => { if (!k && !rot) return [x, y, z]; const a = Math.hypot(x, y) * k + rot, c = Math.cos(a), s = Math.sin(a); return [x * c - y * s, x * s + y * c, z]; };
   const rotv = viewRot();
-  // orbit around the middle of the object's height, so side views stay centred in the frame
+  // camera: it orbits a target point at a distance. Zooming moves the camera toward the target,
+  // so you can shrink down onto a single line and then look around the whole model from there.
   let zLo = 0, zHi = 0; for (const it of sc.items) for (const p of it.pts){ if (p[2] < zLo) zLo = p[2]; if (p[2] > zHi) zHi = p[2]; }
-  const zc = (zLo + zHi) / 2 * Math.min(1, Math.abs(Math.sin(P.pitch)) * 1.5);
-  const view = p => { const [x1, y1, z2] = rotv([p[0], p[1], p[2] - zc]), q = f / (f - z2); return [cx + x1 * q, cy + y1 * q, z2, q]; };
-  // the light is fixed to the world, so orbiting the camera shows the lit side, the dark side and the shadow from any angle
-  const L = worldLight(), Lo = L;
+  const zc = opts.pivot != null ? opts.pivot : (zLo + zHi) / 2 * Math.min(1, Math.abs(Math.sin(P.pitch)) * 1.5);
+  CAM.home = [0, 0, zc / S]; CAM.cx = cx / S; CAM.cy = cy / S;
+  const T = P.tgt ? [P.tgt[0] * S, P.tgt[1] * S, P.tgt[2] * S] : [0, 0, zc];
+  const F = S * focal(P.dist), dist = P.dist * S, near = Math.max(dist * .04, S * 1e-7);
+  const cam = p => rotv([p[0] - T[0], p[1] - T[1], p[2] - T[2]]);
+  const proj = c => { const dc = dist - c[2], q = F / dc; return [cx + c[0] * q, cy + c[1] * q, dc, q]; };
+  const wMax = S * .05;
+  // split a camera-space polyline into the runs in front of the near plane
+  const runsOf = cs => {
+    const runs = []; let run = null;
+    for (let i = 0; i < cs.length; i++){
+      const c = cs[i], inF = dist - c[2] >= near;
+      if (i > 0){ const b = cs[i-1], bIn = dist - b[2] >= near;
+        if (inF !== bIn){ const t = ((dist - near) - b[2]) / (c[2] - b[2]);
+          const m = proj([lerp(b[0], c[0], t), lerp(b[1], c[1], t), lerp(b[2], c[2], t)]);
+          if (inF){ run = [m]; runs.push(run); } else if (run){ run.push(m); run = null; } } }
+      if (inF){ if (!run){ run = []; runs.push(run); } run.push(proj(c)); }
+    }
+    return runs.filter(r => r.length > 1);
+  };
   const step = S * .008;
   const expand = pts => {
-    if (!k) return pts.map(twist);
     const out = [pts[0]];
-    for (let i = 1; i < pts.length; i++){ const a = pts[i-1], b = pts[i], n = Math.max(1, Math.min(40, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / step)));
+    for (let i = 1; i < pts.length; i++){ const a = pts[i-1], b = pts[i];
+      const n = k ? Math.max(1, Math.min(80, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / step))) : 1;
       for (let j = 1; j <= n; j++){ const t = j / n; out.push([lerp(a[0], b[0], t), lerp(a[1], b[1], t), lerp(a[2], b[2], t)]); } }
+    // near the camera, cut long segments up so perspective bends them correctly
     return out.map(twist);
   };
+  const pick = RENDER_PICK ? [] : null;
+  const vis = [];
   for (const it of sc.items){
-    it.tw = expand(it.pts); it.pv = it.tw.map(view);
-    let z = 0; for (const p of it.pv) z += p[2]; it.z = z / it.pv.length;
+    it.tw = expand(it.pts); const cs = it.tw.map(cam);
+    if (it.k === 0){ it.runs = runsOf(cs); if (!it.runs.length) continue;
+      if (it.hl != null){ it.hlRuns = runsOf(cs.slice(Math.min(cs.length - 2, Math.round(it.hl * (cs.length - 1))))); } }
+    else { if (cs.some(c => dist - c[2] < near)) continue; it.pv = cs.map(proj); }
+    let z = 0, n = 0; for (const c of cs){ z += dist - c[2]; n++; } it.dc = z / n;
+    vis.push(it);
+    if (pick){ const pv = it.k === 0 ? it.runs[0] : it.pv, pt0 = pv[0], pt1 = pv[pv.length - 1];
+      pick.push([pt0[0] / S, pt0[1] / S, pt0[2], it.tw[0]], [pt1[0] / S, pt1[1] / S, pt1[2], it.tw[it.tw.length - 1]]);
+      if (pv.length > 2){ const m = pv[pv.length >> 1]; pick.push([m[0] / S, m[1] / S, m[2], it.tw[it.tw.length >> 1]]); } }
   }
+  if (pick){ PICK = pick; PICK.S = S; }
   const trace = (c, pv, close) => { c.beginPath(); c.moveTo(pv[0][0], pv[0][1]); for (let i = 1; i < pv.length; i++) c.lineTo(pv[i][0], pv[i][1]); if (close) c.closePath(); };
+  const L = worldLight(), Lo = L, gz = opts.groundZ || 0;
 
-  // cast shadows: every raised mark projected along the light onto the ground (z = 0)
+  // cast shadows: every raised mark projected along the light onto the ground plane
   if (P.cast && Math.cos(P.pitch) > -.05){
     const Ls = layers(S), sh = Ls.shd, sx = sh.getContext("2d");
-    sx.setTransform(1, 0, 0, 1, 0, 0); sx.clearRect(0, 0, S, S);
+    sx.setTransform(1, 0, 0, 1, 0, 0); sx.clearRect(0, 0, S, S); sx.setTransform(ctx.getTransform());
     sx.lineCap = "round"; sx.lineJoin = "round";
     const sc0 = P.bg === "night" ? "#000000" : "#2A2620";
     sx.strokeStyle = sc0; sx.fillStyle = sc0;
-    for (const it of sc.items){
+    for (const it of vis){
       if (it.ground) continue;
-      const g = it.tw.map(([x, y, z]) => view([x - Lo[0] / Lo[2] * z, y - Lo[1] / Lo[2] * z, 0]));
-      if (it.k === 0){ sx.lineWidth = Math.max(.5, it.w * g[0][3]); trace(sx, g); sx.stroke(); }
-      else if (it.k === 1){ trace(sx, g, true); sx.fill(); }
-      else { sx.beginPath(); sx.arc(g[0][0], g[0][1], Math.max(.4, it.r * g[0][3]), 0, TAU); sx.fill(); }
+      const g = runsOf(it.tw.map(([x, y, z]) => cam([x - Lo[0] / Lo[2] * (z - gz), y - Lo[1] / Lo[2] * (z - gz), gz])));
+      for (const r of g){
+        if (it.k === 0){ sx.lineWidth = Math.max(.5, Math.min(wMax, it.w * r[0][3])); trace(sx, r); sx.stroke(); }
+        else if (it.k === 1){ trace(sx, r, true); sx.fill(); }
+      }
+      if (it.k === 2){ const c = cam([it.tw[0][0] - Lo[0] / Lo[2] * (it.tw[0][2] - gz), it.tw[0][1] - Lo[1] / Lo[2] * (it.tw[0][2] - gz), gz]);
+        if (dist - c[2] >= near){ const p = proj(c); sx.beginPath(); sx.arc(p[0], p[1], Math.max(.4, Math.min(wMax, it.r * p[3])), 0, TAU); sx.fill(); } }
     }
     ctx.save();
     ctx.globalAlpha = P.bg === "night" ? .8 : .45;
     if ("filter" in ctx) ctx.filter = `blur(${(S * (.002 + .005 * L[3])).toFixed(1)}px)`;
-    ctx.drawImage(sh, 0, 0);
+    ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(sh, 0, 0);
     ctx.restore();
   }
 
   // lit marks, far to near
-  sc.items.sort((a, b) => a.z - b.z);
-  const tiltAmt = Math.min(1, (1 - Math.cos(P.pitch)) * 1.4);
+  vis.sort((a, b) => b.dc - a.dc);
+  const tiltAmt = Math.min(1, (1 - Math.cos(P.pitch)) * 1.4 + (P.dist < 2.5 ? (2.5 - P.dist) * .4 : 0));
   const lightK = .25 + 1.35 * P.shadow;
-  for (const it of sc.items){
+  for (const it of vis){
     let col = it.c;
     if (it.n){ const n = it.n, lam = Math.max(0, n[0] * L[0] + n[1] * L[1] + n[2] * L[2]);
       const s = Math.max(-.8, Math.min(.65, (lam - .55) * lightK)); col = shade(col, s); }
-    const fog = clamp01(-it.z / (S * .45)) * .55 * tiltAmt;
+    const fog = clamp01((it.dc - dist) / (S * .45)) * .55 * Math.min(1, tiltAmt);
     if (fog > .01) col = mixHex(col, pal.bg, fog);
-    if (it.k === 0){ ctx.strokeStyle = rgba(col, it.al); ctx.lineWidth = Math.max(.35, it.w * it.pv[0][3]); trace(ctx, it.pv); ctx.stroke(); }
+    if (it.k === 0){
+      ctx.strokeStyle = rgba(col, it.al);
+      for (const r of it.runs){ ctx.lineWidth = Math.max(.35, Math.min(wMax, it.w * r[0][3])); trace(ctx, r); ctx.stroke(); }
+      if (it.hlRuns){ ctx.strokeStyle = rgba(shade(col, .45), it.al); for (const r of it.hlRuns){ ctx.lineWidth = Math.max(.3, Math.min(wMax * .4, it.w * .4 * r[0][3])); trace(ctx, r); ctx.stroke(); } }
+    }
     else if (it.k === 1){ ctx.fillStyle = rgba(col, it.al); trace(ctx, it.pv, true); ctx.fill(); }
-    else { ctx.fillStyle = rgba(col, it.al); ctx.beginPath(); ctx.arc(it.pv[0][0], it.pv[0][1], Math.max(.3, it.r * it.pv[0][3]), 0, TAU); ctx.fill(); }
+    else { ctx.fillStyle = rgba(col, it.al); ctx.beginPath(); ctx.arc(it.pv[0][0], it.pv[0][1], Math.max(.3, Math.min(wMax, it.r * it.pv[0][3])), 0, TAU); ctx.fill(); }
   }
 }
 
@@ -897,7 +952,7 @@ function drawCorona(ctx, k){
   const Z = .92, rM = S * .055 * Z, rW = S * .11 * Z, band = S * .05 * Z, Rmax = S * .47 * Z;
   const roll = normArr(rolling(D, "asleep", 3));
   const gap = 1.4, weeksN = Math.ceil(N / 7), slots = N + weeksN * gap;
-  const wedge = TAU / slots;
+  const wedge = TAU / slots, wf = Math.min(wedge, TAU / 70);
   const ang = i => -Math.PI/2 + (i + Math.floor(i / 7) * gap + .5) * wedge;
   const pt = (a, r, z = 0) => [Math.cos(a) * r, Math.sin(a) * r, z];
   const toward = (p0, p1, t) => [lerp(p0[0], p1[0], t), lerp(p0[1], p1[1], t), lerp(p0[2], p1[2], t)];
@@ -922,7 +977,7 @@ function drawCorona(ctx, k){
     const wp0 = pt(w.a, rW), wr = [[], [], []];
     for (let i = w.from; i < w.to; i++){
       const d = D[i], a = ang(i), ca = Math.cos(a), sa = Math.sin(a);
-      const ja = (rnd() - .5) * wedge * 2.5;
+      const ja = (rnd() - .5) * wf * 2.5;
       const ps = easeOut(ph(...PH.stem, i)); if (ps <= 0) continue;
       const r2 = S * Z * (.155 + .085 * roll[i] * (.4 + P.peaks));
       sc.line(wp0, toward(wp0, pt(a, r2), ps), tone(pal.light, norm(d, "asleep")), .55 * alphaOf(norm(d, "asleep")), lw * .7, UP, true);
@@ -937,7 +992,7 @@ function drawCorona(ctx, k){
         const al = alphaOf(n) * Math.min(1, p * 2.5), c = tone(col, n);
         const nrm = norm3([-ca * lift, -sa * lift, 1]);
         const m = 1 + Math.round(P.complexity * 18 * (d[key] / 170));
-        const spread = wedge * (.8 + 2.6 * P.complexity) * (.3 + .9 * n) * (.25 + .75 * easeOut(p));
+        const spread = wf * (.8 + 2.6 * P.complexity) * (.3 + .9 * n) * (.25 + .75 * easeOut(p));
         const A0 = pt(a, rA, zA);
         sc.poly([A0, pt(a - spread/2, rB, zB), pt(a + spread/2, rB, zB)], c, al * (.16 + .3 * P.contrast), nrm);
         for (let j = 0; j < m; j++){
@@ -961,7 +1016,7 @@ function drawCorona(ctx, k){
     }
     wr.forEach(r => { if (r.length > 1) sc.pline(r, pal.fg, .28 + .3 * P.contrast, lw * .6, UP); });
   }
-  sc.dot(O, S * .007 * (.6 + .4 * Math.min(1, g * 8)), pal.fg, 1, UP);
+  sc.dot(O, U * 11 * (.6 + .4 * Math.min(1, g * 8)), pal.fg, 1, UP);
   renderScene(ctx, sc, S / 2, S / 2, S, pal);
 }
 
@@ -1036,7 +1091,7 @@ function drawBurst(ctx, k){
     const el = (norm(d, "eff") - .35) * 1.1 + (rnd() - .5) * .5;
     const e = rev(i), L = S * (.07 + .4 * peak(norm(d, "asleep"))) * e;
     const r = ray(O, az, el, L, d, i, { e });
-    if (e > 0) sc.dot(r.pts[r.pts.length - 1], S * (.0012 + .0036 * norm(d, "perf")), tone(pal.deep, norm(d, "perf")), r.al, r.nrm);
+    if (e > 0) sc.dot(r.pts[r.pts.length - 1], U * (1.9 + 5.8 * norm(d, "perf")), tone(pal.deep, norm(d, "perf")), r.al, r.nrm);
     const aw = norm(d, "awake");
     if (aw > .45 - .3 * P.complexity){
       const p = r.pts[(r.pts.length * .65) | 0];
@@ -1058,9 +1113,9 @@ function drawBurst(ctx, k){
       for (let j = 0; j < rays; j++)
         ray(so, rnd() * TAU, (rnd() - .3) * 1.2, S * (.03 + .12 * rnd()) * (.4 + norm(d, "asleep")) * en, d, 2000 + n * 50 + j, { w:.55, e:en });
     });
-    sc.dot(so, S * .005, pal.deep, 1, UP);
+    sc.dot(so, U * 8, pal.deep, 1, UP);
   }
-  sc.dot(O, S * .006, pal.accent, 1, UP);
+  sc.dot(O, U * 9.6, pal.accent, 1, UP);
   renderScene(ctx, sc, ox, oy, S, pal);
 }
 
@@ -1069,17 +1124,18 @@ function drawBurst(ctx, k){
 function drawBloom(ctx, k){
   const { D, pal, norm, peak, curve, alphaOf, rnd, noise, U, S } = k;
   const N = D.length, cx = S/2, cy = S/2;
-  setWarp(cx, cy, S, false); const rev = k.rev;
+  const rev = k.rev;
   const g = A.grow, R = S * .27 * (.35 + .65 * (1 - Math.pow(1 - g, 3)));
   const lw = U * (.4 + P.weight * 2);
+  const sc = makeScene();
 
-  // flow streaks circling the sphere
+  // flow streaks circling the sphere: a flat backdrop that stays put while you move the camera
   const count = Math.round(250 + P.complexity * 1600);
   ctx.lineWidth = lw * .55;
   for (let i = 0; i < count; i++){
     const r = S * (.3 + rnd() * .5), th = rnd() * TAU, ds = .02 + rnd() * .09;
     const pts = []; for (let s = 0; s <= 4; s++){ const t = th + ds * s / 4, rr = r * (1 - .02 * s / 4); pts.push([cx + Math.cos(t) * rr, cy + Math.sin(t) * rr]); }
-    ctx.strokeStyle = rgba(pal.fg, (.08 + rnd() * .3) * (.6 + .4 * P.contrast));
+    ctx.strokeStyle = rgba(pal.fg, (.08 + rnd() * .3) * (.6 + .4 * P.contrast) * clamp01((P.dist - .6) / 1.4));
     pline(ctx, pts);
   }
 
@@ -1097,12 +1153,7 @@ function drawBloom(ctx, k){
   }
   const K = petals.length;
   const sizeScale = Math.min(1.5, Math.sqrt(1600 / Math.max(200, K)));
-  // the tilt joystick turns the sphere so its eye looks toward the knob
-  const rot = viewRot();
-  const light = worldLight(), ls = rot(light), lsm = Math.hypot(ls[0], ls[1]) || 1;
   const phiMin = .2, phiMax = 1.95;
-
-  const items = [];
   for (let kk = 0; kk < K; kk++){
     const p = petals[kk], f = 1 - kk / K; // oldest (kk=0) at the rim
     // bud → bloom: petals emerge at the eye first and slide outward as they unfurl, rim petals last
@@ -1118,46 +1169,24 @@ function drawBloom(ctx, k){
     // petal centreline in 3D: leaves the surface along the normal, sweeps away from the eye, curls sideways
     const pts3 = [];
     for (let s = 0; s <= 5; s++){
-      const t = s / 5;
-      const out = R * swell + len * t * .55;
+      const t = s / 5, out = R * swell + len * t * .55;
       pts3.push([0, 1, 2].map(c => nrm[c] * out + ePhi[c] * len * t * .85 + eTh[c] * len * curl * t * t));
     }
-    const P3 = pts3.map(rot);
-    const nz = rot(nrm);
-    const lam = Math.max(0, nrm[0] * light[0] + nrm[1] * light[1] + nrm[2] * light[2]);
-    items.push({ p, z: P3[0][2], pts: P3.map(v => [cx + v[0], cy + v[1]]), lam, depth: nz[2], len, p0 });
-  }
-  // the eye joins the depth sort so it hides behind the petals when you orbit round the back
-  const pole = rot([0, 0, 1]);
-  items.push({ eye:true, z: pole[2] * R * .9 });
-  items.sort((a, b) => a.z - b.z);
-  function drawEye(){
-    const [ex, ey] = wp(cx + pole[0] * R, cy + pole[1] * R);
-    const er = R * Math.sin(phiMin) * 1.05, ea = Math.atan2(pole[1], pole[0]), fz = Math.max(.04, Math.abs(pole[2]));
-    ctx.fillStyle = P.bg === "night" ? "#0B0C10" : "#22222A";
-    ctx.beginPath(); ctx.ellipse(ex, ey, er * fz, er, ea, 0, TAU); ctx.fill();
-    ctx.strokeStyle = rgba(pal.accent === "#000000" ? "#888888" : pal.accent, .7); ctx.lineWidth = U * 3; ctx.stroke();
-    ctx.strokeStyle = rgba("#FFFFFF", .15); ctx.lineWidth = U * 1.5;
-    ctx.beginPath(); ctx.ellipse(ex, ey, er * .72 * fz, er * .72, ea, 0, TAU); ctx.stroke();
-  }
-
-  for (const it of items){
-    if (it.eye){ drawEye(); continue; }
-    const { p, pts, lam, depth, len, p0 } = it;
-    const w = Math.max(U * 2, len * (.2 + .12 * P.weight)) * (.7 + .3 * Math.max(0, depth));
-    const base = pal[p.key];
-    const tone = shade(shade(base, (curve(p.n) - .5) * (.15 + 1.05 * P.contrast)), (lam - .55) * (.35 + .4 * P.contrast));
+    const w = Math.max(U * 2, len * (.2 + .12 * P.weight));
+    const tone = shade(pal[p.key], (curve(p.n) - .5) * (.15 + 1.05 * P.contrast));
     const al = Math.max(.6, alphaOf(p.n)) * Math.min(1, p0 * 3);
-    if (P.cast){
-      const off = w * (.2 + 1.1 * light[3]);
-      ctx.strokeStyle = rgba(shade(pal.bg, -.5), .55); ctx.lineWidth = w;
-      pline(ctx, pts.map(([x, y]) => [x - ls[0] / lsm * off, y - ls[1] / lsm * off]));
-    }
-    ctx.strokeStyle = rgba(tone, al); ctx.lineWidth = w;
-    pline(ctx, pts);
-    ctx.strokeStyle = rgba(shade(tone, .45), al); ctx.lineWidth = w * .4;
-    pline(ctx, pts.slice(3));
+    sc.pline(pts3, tone, al, w, nrm);
+    sc.items[sc.items.length - 1].hl = .6; // a lighter stripe along the outer part of the petal
   }
+  // the eye: a dark disc at the pole with a bright rim
+  const er = R * .97, ring = [], ring2 = [];
+  for (let s = 0; s <= 40; s++){ const t = s / 40 * TAU, sp = Math.sin(phiMin * 1.05);
+    ring.push([Math.cos(t) * sp * er, Math.sin(t) * sp * er, Math.cos(phiMin * 1.05) * er]);
+    ring2.push([Math.cos(t) * sp * er * .72, Math.sin(t) * sp * er * .72, Math.cos(phiMin * 1.05) * er]); }
+  sc.poly(ring.slice(0, 40), P.bg === "night" ? "#0B0C10" : "#22222A", 1, null);
+  sc.pline(ring, pal.accent === "#000000" ? "#888888" : pal.accent, .7, U * 3, null);
+  sc.pline(ring2, "#FFFFFF", .15, U * 1.5, null);
+  renderScene(ctx, sc, cx, cy, S, pal, { pivot: 0, groundZ: -R * 1.35 });
 }
 
 function fmtMin(m){ const h = Math.floor(m / 60), r = Math.round(m % 60); return `${h}h ${String(r).padStart(2, "0")}m`; }
@@ -1208,11 +1237,16 @@ if (COARSE) $("gifSize").value = "480";
 const cv = $("cv"), cctx = cv.getContext("2d");
 let raf = 0;
 function schedule(){ if (playing) return; cancelAnimationFrame(raf); raf = requestAnimationFrame(draw); }
+/* while you drag, zoom or slide, the preview draws at a lighter resolution so it keeps up with your hand,
+   then sharpens a moment after you stop */
+let moving = false, moveTimer = 0;
+function interacting(){ moving = true; clearTimeout(moveTimer); moveTimer = setTimeout(() => { moving = false; schedule(); }, 160); }
 function draw(){
   const box = cv.getBoundingClientRect();
-  const px = Math.min(playing ? (COARSE ? 720 : 1000) : (COARSE ? 1300 : 2000), Math.max(300, Math.round(box.width * (window.devicePixelRatio || 1))));
+  const cap = moving ? (COARSE ? 420 : 640) : playing ? (COARSE ? 620 : 900) : (COARSE ? 1300 : 2000);
+  const px = Math.min(cap, Math.max(300, Math.round(box.width * (window.devicePixelRatio || 1))));
   if (cv.width !== px){ cv.width = px; cv.height = px; }
-  render(cctx, px, playing ? curAnim : STATIC);
+  RENDER_PICK = true; render(cctx, px, playing ? curAnim : STATIC); RENDER_PICK = false;
 }
 new ResizeObserver(schedule).observe(cv);
 
@@ -1255,14 +1289,26 @@ function sync(){
   $("dataChip").textContent = `${D.length} ${P.naps ? "SLEEPS" : "NIGHTS"} · ${fd(D[0].date)} – ${fd(D[D.length-1].date)}, ${D[D.length-1].date.getFullYear()}`;
   const avg = k => D.reduce((s, d) => s + d[k], 0) / D.length;
   $("stats").innerHTML = `<div><b>${fmtMin(avg("asleep"))}</b><span>Avg asleep</span></div><div><b>${Math.round(avg("deep"))}m</b><span>Avg deep</span></div><div><b>${Math.round(avg("perf"))}%</b><span>Avg perf.</span></div>`;
-  $("legendText").textContent = LEGENDS[P.style]; $("legendMobile").textContent = LEGENDS[P.style];
+  const kp = palette(P), sw = c => `<i class="g" style="background:${c}"></i>`, gl = cls => `<i class="g ${cls}"></i>`;
+  const stageRows = [[sw(kp.deep), "Deep", "minutes of deep (slow-wave) sleep"], [sw(kp.rem), "REM", "minutes of REM sleep"], [sw(kp.light), "Light", "minutes of light sleep"]];
+  const KEY = {
+    corona: [[gl("line"), "Spoke", "one night, running clockwise from the top, oldest to newest"], [gl("dot"), "Inner branches", "weeks and months grouping the nights"], ...stageRows.map(([g, n, m]) => [g, n + " fan", m + "; longer and brighter means a stronger night"]),
+      [sw(kp.awake), "Spike", "sleep performance; taller is better"], [sw(kp.accent), "Spike tip", "time awake during the night; bigger is more"], [gl("ring"), "Swell of the ring", "your 7-night average sleep"]],
+    burst: [[gl("line"), "Ray", "one night; longer means more time asleep"], [gl("line"), "Thickness", "deep sleep"], ...stageRows.map(([g, n]) => [g, n + " ray", "the night's strongest stage was " + (n === "REM" ? n : n.toLowerCase())]),
+      [gl("line"), "Wobble", "low sleep consistency"], [sw(kp.rem), "Cross-ticks", "REM sleep; longer ticks mean more"], [sw(kp.deep), "End dot", "sleep performance; bigger is better"],
+      [sw(kp.awake), "Fork", "a restless night with lots of time awake"], [gl("ring"), "Climbs toward you", "high sleep efficiency"], [gl("dot"), "Side burst", "naps, when included"]],
+    bloom: [[gl("line"), "Petal", "a slice of one night's sleep"], ...stageRows, [sw(kp.awake), "Awake", "minutes awake in bed"],
+      [gl("ring"), "Rim to eye", "oldest night at the rim, newest at the centre"], [gl("line"), "Petal length", "how strong that stage was that night"], [gl("dot"), "Bulges", "runs of long nights"]]
+  };
+  const keyHtml = KEY[P.style].map(([g, n, m]) => `<li>${g}<span><b>${n}</b> · ${m}</span></li>`).join("");
+  $("keyDesk").innerHTML = keyHtml; $("keyMobile").innerHTML = keyHtml;
   const pal = palette(P);
   $("keys").innerHTML = [["Light", pal.light], ["Deep", pal.deep], ["REM", pal.rem], ["Awake", pal.awake]]
     .map(([n, c]) => `<span><i style="background:${c}"></i>${n}</span>`).join("");
   schedule();
 }
 
-for (const id of ["peaks","contrast","complexity","weight"]) $(id).addEventListener("input", e => { P[id] = e.target.value / 100; sync(); });
+for (const id of ["peaks","contrast","complexity","weight"]) $(id).addEventListener("input", e => { interacting(); P[id] = e.target.value / 100; sync(); });
 $("twist").addEventListener("input", e => { P.twist = e.target.value / 100; sync(); });
 $("nights").addEventListener("input", e => { P.nights = +e.target.value; sync(); });
 $("naps").addEventListener("change", e => { const wasAll = P.nights >= ALL.filter(d => P.naps || !d.nap).length; P.naps = e.target.checked; if (wasAll) P.nights = 9999; sync(); });
@@ -1357,31 +1403,67 @@ function bindOrbit(el, gain){
   el.addEventListener("pointerup", end); el.addEventListener("pointercancel", end);
 }
 bindOrbit($("orbitPad"), 2.2);
-/* artwork gestures: one finger or mouse drag orbits; pinch, wheel or trackpad pinch zooms toward that spot;
-   two fingers, Shift+drag or right-drag pans; double-click resets the zoom */
-function syncZoom(){ $("zoomReset").textContent = (Math.round(P.zoom * 10) / 10) + "×"; }
-function clampPan(){ const m = .5 * Math.max(1, P.zoom); P.panX = Math.max(-m, Math.min(m, P.panX)); P.panY = Math.max(-m, Math.min(m, P.panY)); }
-function zoomAt(f, sx, sy){
-  const z0 = P.zoom, z1 = Math.max(.5, Math.min(6, z0 * f)), r = z1 / z0;
-  P.panX = sx - .5 - (sx - .5 - P.panX) * r; P.panY = sy - .5 - (sy - .5 - P.panY) * r; P.zoom = z1;
-  clampPan(); syncZoom(); if (!playing) schedule();
+/* camera controls on the artwork.
+   Drag orbits around the target. Scroll, pinch or hold + flies the camera toward the target, and the target
+   slides onto whichever line is under the cursor (or nearest the middle), so you can shrink down onto a line
+   and then drag to look around the whole model from that spot. Shift-drag, right-drag or two fingers slide sideways. */
+function syncZoom(){ const z = focal(P.dist) / P.dist; $("zoomReset").textContent = (z < 10 ? Math.round(z * 10) / 10 : z < 1000 ? Math.round(z) : Math.round(z / 100) / 10 + "k") + "×"; }
+function camTarget(){ return P.tgt ? P.tgt.slice() : CAM.home.slice(); }
+function camBasis(){ const cy = Math.cos(P.yaw), sy = Math.sin(P.yaw), cp = Math.cos(P.pitch), sp = Math.sin(P.pitch);
+  return { right:[cy, -sy, 0], down:[sy * cp, cy * cp, -sp] }; }
+function pickAt(sx, sy){
+  if (!PICK.length) return null;
+  let best = null, bs = .03;
+  for (const p of PICK){ const d = (p[0] - sx) ** 2 + (p[1] - sy) ** 2; if (d > .012) continue;
+    const s = d + .00002 * p[2] / (PICK.S || 1); if (s < bs || !best){ bs = s; best = p; } }
+  return best ? [best[3][0] / PICK.S, best[3][1] / PICK.S, best[3][2] / PICK.S] : null;
 }
-function zoomTo(z1, ms = 220){
-  const z0 = P.zoom, x0 = P.panX, y0 = P.panY, t0 = performance.now(), reset = z1 === 1;
-  const st = now => { const u = Math.min(1, (now - t0) / ms), e = 1 - Math.pow(1 - u, 3);
-    const z = z0 + (z1 - z0) * e; if (reset){ P.panX = x0 * (1 - e); P.panY = y0 * (1 - e); P.zoom = z; } else zoomAt(z / P.zoom, .5, .5);
-    syncZoom(); if (!playing) draw(); if (u < 1) requestAnimationFrame(st); };
-  requestAnimationFrame(st);
+function flyBy(f, sx, sy, pull){
+  interacting();
+  const T = camTarget();
+  P.dist = Math.max(DMIN, Math.min(DMAX, P.dist / f));
+  if (f > 1 && pull > 0){ const pk = pickAt(sx, sy); if (pk) for (let i = 0; i < 3; i++) T[i] += (pk[i] - T[i]) * pull; }
+  if (f < 1 && P.dist > 1.2){ const h = CAM.home, back = Math.min(1, (P.dist - 1.2) / 1.8) * .2; for (let i = 0; i < 3; i++) T[i] += (h[i] - T[i]) * back; }
+  P.tgt = T; syncZoom(); if (!playing) schedule();
 }
-$("zoomIn").addEventListener("click", () => zoomTo(Math.min(6, P.zoom * 1.5)));
-$("zoomOut").addEventListener("click", () => zoomTo(Math.max(.5, P.zoom / 1.5)));
-$("zoomReset").addEventListener("click", () => zoomTo(1));
+function panBy(dx, dy){
+  interacting();
+  const q = focal(P.dist) / P.dist, { right, down } = camBasis(), T = camTarget();
+  for (let i = 0; i < 3; i++) T[i] -= (right[i] * dx + down[i] * dy) / q;
+  P.tgt = T; if (!playing) schedule();
+}
+let camTween = 0;
+function camReset(ms = 650){
+  cancelAnimationFrame(camTween);
+  const d0 = P.dist, T0 = camTarget(), t0 = performance.now();
+  const st = now => { const u = Math.min(1, (now - t0) / ms), e = u < .5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2, h = CAM.home;
+    P.dist = d0 * Math.pow(DIST0 / d0, e); P.tgt = T0.map((v, i) => lerp(v, h[i], e));
+    if (u >= 1){ P.dist = DIST0; P.tgt = null; }
+    syncZoom(); if (!playing) draw(); if (u < 1) camTween = requestAnimationFrame(st); };
+  camTween = requestAnimationFrame(st);
+}
+/* hold + or − to keep flying; a quick tap still nudges */
+function holdZoom(btn, dir){
+  let active = false, last = 0, start = 0;
+  // the longer you hold, the faster it goes
+  const tick = now => { if (!active) return; const dt = Math.min(.05, (now - last) / 1000); last = now;
+    const held = (now - start) / 1000, rate = 1.3 + Math.min(4, held * 1.4);
+    flyBy(Math.exp(dir * rate * dt), .5, .5, dir > 0 ? Math.min(.25, 3.5 * dt) : 0); requestAnimationFrame(tick); };
+  btn.addEventListener("pointerdown", e => { if (e.button > 0) return; e.preventDefault(); cancelAnimationFrame(camTween);
+    active = true; last = start = performance.now(); btn.setPointerCapture(e.pointerId); flyBy(Math.exp(dir * .12), .5, .5, dir > 0 ? .12 : 0); requestAnimationFrame(tick); });
+  const stop = () => { active = false; };
+  btn.addEventListener("pointerup", stop); btn.addEventListener("pointercancel", stop); btn.addEventListener("lostpointercapture", stop);
+  btn.addEventListener("click", e => { if (e.detail === 0) flyBy(dir > 0 ? 1.8 : 1 / 1.8, .5, .5, dir > 0 ? .4 : 0); }); // keyboard
+  btn.addEventListener("contextmenu", e => e.preventDefault());
+}
+holdZoom($("zoomIn"), 1); holdZoom($("zoomOut"), -1);
+$("zoomReset").addEventListener("click", () => camReset());
 {
   const ptrs = new Map(); let pinch = null, mode = "orbit";
   const frac = e => { const r = cv.getBoundingClientRect(); return [(e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height]; };
   const pstate = () => { const [a, b] = [...ptrs.values()]; return { d: Math.hypot(a[0] - b[0], a[1] - b[1]) || 1e-3, mx: (a[0] + b[0]) / 2, my: (a[1] + b[1]) / 2 }; };
   cv.addEventListener("pointerdown", e => {
-    cancelAnimationFrame(tween); cv.setPointerCapture(e.pointerId); ptrs.set(e.pointerId, frac(e));
+    cancelAnimationFrame(tween); cancelAnimationFrame(camTween); cv.setPointerCapture(e.pointerId); ptrs.set(e.pointerId, frac(e));
     mode = (e.shiftKey || e.button === 1 || e.button === 2) ? "pan" : "orbit";
     if (ptrs.size === 2) pinch = pstate();
     e.preventDefault();
@@ -1391,20 +1473,19 @@ $("zoomReset").addEventListener("click", () => zoomTo(1));
     const prev = ptrs.get(e.pointerId), cur = frac(e); ptrs.set(e.pointerId, cur);
     if (ptrs.size >= 2){
       const s = pstate();
-      if (pinch){ P.panX += s.mx - pinch.mx; P.panY += s.my - pinch.my; zoomAt(s.d / pinch.d, s.mx, s.my); }
+      if (pinch){ panBy(s.mx - pinch.mx, s.my - pinch.my); const f = s.d / pinch.d; flyBy(f, s.mx, s.my, f > 1 ? Math.min(.3, (f - 1) * 1.5) : 0); }
       pinch = s; return;
     }
     const dx = cur[0] - prev[0], dy = cur[1] - prev[1];
-    if (mode === "pan"){ P.panX += dx; P.panY += dy; clampPan(); }
-    else { const k = 1.2 * Math.PI / Math.max(1, P.zoom * .6 + .4);
-      P.yaw = wrapA(P.yaw - dx * k); P.pitch = Math.max(-Math.PI, Math.min(Math.PI, P.pitch - dy * k)); syncPads(); }
-    if (!playing) schedule();
+    if (mode === "pan") panBy(dx, dy);
+    else { const k = 1.2 * Math.PI;
+      interacting(); P.yaw = wrapA(P.yaw - dx * k); P.pitch = Math.max(-Math.PI, Math.min(Math.PI, P.pitch - dy * k)); syncPads(); if (!playing) schedule(); }
   });
   const up = e => { ptrs.delete(e.pointerId); if (ptrs.size < 2) pinch = null; if (ptrs.size === 1) mode = "orbit"; };
   cv.addEventListener("pointerup", up); cv.addEventListener("pointercancel", up);
   cv.addEventListener("wheel", e => { e.preventDefault(); const [sx, sy] = frac(e);
-    zoomAt(Math.exp(-e.deltaY * (e.ctrlKey ? .012 : .0018)), sx, sy); }, { passive:false });
-  cv.addEventListener("dblclick", () => zoomTo(1));
+    const f = Math.exp(-e.deltaY * (e.ctrlKey ? .012 : .0018)); flyBy(f, sx, sy, f > 1 ? Math.min(.35, (f - 1) * 2) : 0); }, { passive:false });
+  cv.addEventListener("dblclick", () => camReset());
   cv.addEventListener("contextmenu", e => e.preventDefault());
 }
 $("orbitPad").addEventListener("dblclick", () => goView("top"));
